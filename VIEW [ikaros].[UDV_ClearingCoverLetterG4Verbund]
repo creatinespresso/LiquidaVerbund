@@ -1,0 +1,302 @@
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE      VIEW [ikaros].[UDV_ClearingCoverLetterG4Verbund]
+AS
+
+WITH Creditor AS (
+SELECT Client.ContactID, Creditor.FAO CreditorFAO,  Creditor.AddressForm CreditorAddressForm, Creditor.Name1 CreditorName1, Creditor.Name2 CreditorName2, Creditor.Name3 CreditorName3, Creditor.FirstName CreditorFirstName, CreditorAddress.Street, CreditorAddress.City, CreditorAddress.PostalCode, CreditorAddress.CountryCode, Country.Designation CreditorCountry FROM ikaros.Client 
+JOIN ikaros.Contact ClientContact ON ClientContact.ID = Client.ContactID
+JOIN ikaros.ContactReference CreditorRef ON CreditorRef.SourceContactID = ClientContact.ID
+JOIN ikaros.ContactReferenceType CreditorRefType ON CreditorRefType.ID = CreditorRef.ContactReferenceTypeID
+JOIN ikaros.Contact Creditor ON Creditor.ID = CreditorRef.TargetContactID
+JOIN ikaros.Address CreditorAddress ON CreditorAddress.ContactID = Creditor.ID 
+JOIN ikaros.Country on  CreditorAddress.CountryCode = Country.PostCode
+WHERE CreditorRefType.TypeCode = 'KK' AND CreditorAddress.PostalAddress = 1
+),
+
+Debtor AS (
+SELECT Client.ContactID, Debtor.FAO DebtorFAO,  Debtor.AddressForm DebtorAddressForm, Debtor.Name1 DebtorName1, Debtor.Name2 DebtorName2, Debtor.Name3 DebtorName3, Debtor.FirstName DebtorFirstName, Debtor.Matchcode Debtor, DebtorAddress.Street, DebtorAddress.City, DebtorAddress.PostalCode, DebtorAddress.CountryCode, Country.Designation DebtorCountry FROM ikaros.Client 
+JOIN ikaros.Contact ClientContact ON ClientContact.ID = Client.ContactID
+JOIN ikaros.ContactReference DebtorRef ON DebtorRef.SourceContactID = ClientContact.ID
+JOIN ikaros.ContactReferenceType DebtorRefType ON DebtorRefType.ID = DebtorRef.ContactReferenceTypeID
+JOIN ikaros.Contact Debtor ON Debtor.ID = DebtorRef.TargetContactID
+JOIN ikaros.Address DebtorAddress ON DebtorAddress.ContactID = Debtor.ID 
+JOIN ikaros.Country on  DebtorAddress.CountryCode = Country.PostCode
+WHERE DebtorRefType.TypeCode = 'KD' AND DebtorAddress.PostalAddress = 1
+)
+
+
+SELECT 
+	MainClearing.ID AS ClearingID, -- Clearing-ID des Verbund-Gläubigers 
+SubClearing.ID AS SubClearingID,  -- Clearing-ID der Einzel-Gläubiger 
+AbrMand.ClientNo AS MainClientNo, 
+AbrMand.Matchcode AS MainClient, 
+Client.ClientNo AS SubClientNo, 
+Contact.Matchcode AS SubClient, 
+	ikaros.ClrGetClearingDate(MainClearing.ID, 'ikaros.ClearingCoverLetter') AS ClearingDate,
+    AbrMand.ClientNo AS ClientNo,
+    AbrMand.CreditTransfer AS ClearingTransfer,
+    AbrMand.DebitEntry AS DirectDebit,
+	CASE	WHEN MainClearing.OIAllocation is null
+			THEN null
+	ELSE 
+			CASE	WHEN MainClearing.OIAllocation <> 0
+					THEN ikaros.GetTrue()
+					ELSE ikaros.GetFalse()
+			END
+	END AS OIPaymentAllocated,
+    -- zusammengesetzter Name
+    RTRIM(LTRIM(ISNULL(AbrMand.FirstName,''))) +	CASE	WHEN ISNULL(AbrMand.FirstName, '') != ''
+															THEN ' '
+															ELSE ''
+													END + 
+    RTRIM(LTRIM(ISNULL(AbrMand.Name1,''))) + ' ' + 
+    RTRIM(LTRIM(ISNULL(AbrMand.Name2,''))) AS Client,
+    AbrMand.BookingAddressForm AS AddressForm,
+    AbrMand.BookingFirstName AS FirstName,
+    AbrMand.BookingName1 AS Name1,
+    AbrMand.BookingName2 AS Name2,
+    AbrMand.BookingName3 AS Name3,
+    AbrMand.BookingFOA AS FAO,
+    AbrMand.BookingStreet AS Street,
+    AbrMand.BookingPostalCode AS PostalCode,
+    AbrMand.BookingCity AS City,
+    AbrMand.BookingCountryCode AS CountryCode,
+	Country.Designation AS Country,
+    AbrMand.BookingSalutation AS Salutation,	
+    -- Bankdaten des Gläubigers
+    AbrMand.AccountNoIBAN AS AccountNoIBAN,
+    AbrMand.AccountNo AS AccountNo,
+    AbrMand.BankCodeBIC AS BankCodeBIC,    
+    AbrMand.BankCode AS BankCode,    
+    AbrMand.Bank AS Bank,
+    AbrMand.BankCodeBICCT as BankCodeBICCT,
+    AbrMand.BankCodeCT as BankCodeCT,
+    AbrMand.AccountNoIBANCT as AccountNoIBANCT,
+    AbrMand.AccountNoCT as AccountNoCT,
+    AbrMand.BankCT as BankCT,
+    AbrMand.BankCodeBICDD as BankCodeBICDD,
+    AbrMand.BankCodeDD as BankCodeDD,
+    AbrMand.AccountNoIBANDD as AccountNoIBANDD,
+    AbrMand.AccountNoDD as AccountNoDD,
+    AbrMand.BankDD as BankDD,
+    -- Bankdaten des IKU-Kontakts
+    BankAccountCC.BankCode1 AS DCABankCodeBIC,
+    BankAccountCC.BankCode2 AS DCABankCode,
+    BankAccountCC.AccountNo1 AS DCAAccountNoIBAN,
+    BankAccountCC.AccountNo2 AS DCAAccountNo,
+    BankAccountCC.Bank AS DCABank,
+    BankAccountCCCT.BankCode1 as DCABankCodeBICCT,
+    BankAccountCCCT.BankCode2 as DCABankCodeCT,
+    BankAccountCCCT.AccountNo1 as DCAAccountNoIBANCT,
+    BankAccountCCCT.AccountNo2 as DCAAccountNoCT,
+    BankAccountCCCT.Bank as DCABankCT,
+    BankAccountCCDD.BankCode1 as DCABankCodeBICDD,
+    BankAccountCCDD.BankCode2 as DCABankCodeDD,
+    BankAccountCCDD.AccountNo1 as DCAAccountNoIBANDD,
+    BankAccountCCDD.AccountNo2 as DCAAccountNoDD,
+    BankAccountCCDD.Bank as DCABankDD,
+    -- Abrechnungsergebnisse incl. OP-Verrechnung
+    MainClearing.InvoiceNo AS InvoiceNo,
+    MainClearing.ClearingNo AS ClearingNo,
+    'ABR' AS Sorting,
+    ClearingResult.StageCategory AS StageCategory,
+    ClearingResult.VATRate AS VATRate,
+    ISNULL(ClearingResult.TPMPayout,0) AS TPMPayout,
+    ISNULL(ClearingResult.TPMInvoice,0) AS TPMInvoice,
+    ISNULL(ClearingResult.CostBurden,0) AS CostBurden,
+    ISNULL(ClearingResult.TPMPayout,0)-isnull(ClearingResult.TPMInvoice,0)-isnull(ClearingResult.CostBurden,0) as Payout,
+    CASE WHEN Client.ClearingDirectDebitEBankingVoucherBaseSubType LIKE 'DD-SEPA%' THEN 1 ELSE 0 END AS SepaDirectDebit,
+    SDDMUV.Reference  AS SepaMandateReference,
+    SDDMUV.SepaCreditorId,
+	CaseCurrency.Code as CurrencyCode,
+	CaseCurrency.Designation as CurrencyDesignation,
+	ikaros.TranslateAmount(ikaros.ClearingResult.CurrencyID, BookingCurrency.ID, ISNULL(ClearingResult.TPMPayout,0)-isnull(ClearingResult.TPMInvoice,0)-isnull(ClearingResult.CostBurden,0),  CAST(ISNULL( MainClearing.BookingTime, GETDATE())AS DATE)) AS PayoutInBookingCurrency,
+	Setting.value  AS BookingCurrency,
+	AbrMand.BlockForClearingDirectDebit,
+	AbrMand.BlockForClearingTransfer,
+	Client.UDF_Interne_Mandantennummer InternalClientNo,
+	Debtor.ContactID DebtorId,
+	Debtor.DebtorFAO,
+	Debtor.DebtorAddressForm,
+	Debtor.DebtorFirstName,
+	Debtor.DebtorName1,
+	Debtor.DebtorName2,
+	Debtor.DebtorName3,
+	Debtor.Street DebtorStreet,
+	Debtor.City DebtorCity,
+	Debtor.CountryCode DebtorCountryCode,
+	Debtor.DebtorCountry,
+	Debtor.PostalCode DebtorPostalCode,
+	Creditor.ContactID CreditorId,
+	Creditor.CreditorFAO,
+	Creditor.CreditorAddressForm,
+	Creditor.CreditorFirstName,
+	Creditor.CreditorName1,
+	Creditor.CreditorName2,
+	Creditor.CreditorName3,
+	Creditor.Street CreditorStreet,
+	Creditor.City CreditorCity,
+	Creditor.CountryCode CreditorCountryCode,
+	Creditor.CreditorCountry,
+	Creditor.PostalCode CreditorPostalCode
+FROM	ikaros.ClearingResult
+--RIGHT OUTER JOIN	ikaros.Clearing ON Clearing.ID = ClearingResult.ClearingID
+RIGHT OUTER JOIN ikaros.Clearing AS SubClearing ON (SubClearing.ID = ClearingResult.ClearingID)  -- Clearing des Einzel-Gläubigers
+RIGHT OUTER JOIN ikaros.Clearing AS MainClearing -- Clearing des Verbund-Gläubigers 
+ON (MainClearing.ClearingRunID = SubClearing.ClearingRunID AND MainClearing.ClientID = SubClearing.ClearingClientID) 
+CROSS JOIN ikaros.Setting
+JOIN	ikaros.ClearingClientName AS AbrMand ON AbrMand.ID = MainClearing.ID
+JOIN ikaros.Client AS Client ON Client.ContactID = SubClearing.ClientID
+JOIN ikaros.Contact ON Contact.ID = subClearing.ClientID -- Kontakt zum Einzel-Gläubiger 
+--EIHIN 2023-12-18: Zeitweise auskommentiert, solange die Bankverbindung in GL gespeichert ist. Wenn die jeweilige Bankverbindung im IKU-Kontakt liegt, wieder zurücknehmen und die darunter liegende Zeile auskommentieren.
+--LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCC ON (BankAccountCC.ID = ikaros.BankAccountGetStandard(ikaros.SettingGetString('IKUKontakt', DEFAULT, DEFAULT), DEFAULT))
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCC ON (BankAccountCC.ID = ikaros.BankAccountGetStandard((SELECT TOP 1 ID FROM ikaros.Contact IKU where IKU.ContactNo = 1000000009), DEFAULT))
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCCCT ON (BankAccountCCCT.ID = ikaros.BankAccountGetForClearing(AbrMand.ContactID,'I','CT', AbrMand.CreditTransfer, DEFAULT))
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCCDD ON (BankAccountCCDD.ID = ikaros.BankAccountGetForClearing(AbrMand.ContactID,'I','DD', AbrMand.DebitEntry, DEFAULT))
+JOIN ikaros.Client AS AbrClient on AbrMand.ContactID = AbrClient.ContactID
+LEFT OUTER JOIN ikaros.SepaDirectDebitMandateUpdateableValues SDDMUV on (SDDMUV.SepaDirectDebitMandateId = Client.ClearingSepaDirectDebitMandateID
+	AND SDDMUV.Id = (SELECT TOP 1 ID FROM ikaros.SepaDirectDebitMandateUpdateableValues WHERE SepaDirectDebitMandateId = Client.ClearingSepaDirectDebitMandateID ORDER BY LastUpdate DESC))
+LEFT JOIN ikaros.Country on  AbrMand.BookingCountryCode = Country.PostCode
+LEFT JOIN ikaros.Currency AS CaseCurrency ON ikaros.ClearingResult.CurrencyID = CaseCurrency.ID
+LEFT JOIN ikaros.Currency AS BookingCurrency ON ikaros.Setting.Value = BookingCurrency.Code
+LEFT JOIN Debtor ON Debtor.ContactID = Client.ContactID
+LEFT JOIN Creditor ON Creditor.ContactID = Client.ContactID
+
+WHERE Setting.SettingName = 'waehrung' 
+UNION ALL
+SELECT 
+	MainClearing.ID AS ClearingID, -- Clearing-ID des Verbund-Gläubigers 
+SubClearing.ID AS SubClearingID,  -- Clearing-ID der Einzel-Gläubiger 
+AbrMand.ClientNo AS MainClientNo, 
+AbrMand.Matchcode AS MainClient, 
+Client.ClientNo AS SubClientNo, 
+Contact.Matchcode AS SubClient, 
+	ikaros.ClrGetClearingDate(MainClearing.ID, 'ikaros.ClearingCoverLetter') AS ClearingDate,
+    AbrMand.ClientNo AS ClientNo,
+    AbrMand.CreditTransfer AS ClearingTransfer,
+    AbrMand.DebitEntry AS DirectDebit,
+	CASE	WHEN MainClearing.OIAllocation is null
+			THEN NULL
+	ELSE
+			CASE	WHEN MainClearing.OIAllocation <> 0
+					THEN ikaros.GetTrue()
+					ELSE ikaros.GetFalse()
+			END
+    END AS OIPaymentAllocated,
+    -- zusammengesetzter Name
+    RTRIM(LTRIM(ISNULL(AbrMand.FirstName,''))) +	CASE	WHEN ISNULL(AbrMand.FirstName,'') != ''
+															THEN ' '
+													ELSE    ''
+													END + 
+    RTRIM(LTRIM(ISNULL(AbrMand.Name1,''))) + ' ' + 
+    RTRIM(LTRIM(ISNULL(AbrMand.Name2,''))) AS Client,
+    AbrMand.BookingAddressForm AS AddressForm,
+    AbrMand.BookingFirstName AS FirstName,
+    AbrMand.BookingName1 AS Name1,
+    AbrMand.BookingName2 AS Name2,
+    AbrMand.BookingName3 AS Name3,
+    AbrMand.BookingFOA AS FAO,
+    AbrMand.BookingStreet AS Street,
+    AbrMand.BookingPostalCode AS PostalCode,
+    AbrMand.BookingCity AS City,
+    AbrMand.BookingCountryCode AS CountryCode,
+	Country.Designation AS Country,
+    AbrMand.BookingSalutation AS Salutation,
+    -- Bankdaten des Gläubigers
+	AbrMand.AccountNoIBAN AS AccountNoIBAN,
+	AbrMand.AccountNo AS AccountNo,
+    AbrMand.BankCodeBIC AS BankCodeBIC,    
+    AbrMand.BankCode AS BankCode,    
+    AbrMand.Bank AS Bank,
+    AbrMand.BankCodeBICCT as BankCodeBICCT,
+    AbrMand.BankCodeCT as BankCodeCT,
+    AbrMand.AccountNoIBANCT as AccountNoIBANCT,
+    AbrMand.AccountNoCT as AccountNoCT,
+    AbrMand.BankCT as BankCT,
+    AbrMand.BankCodeBICDD as BankCodeBICDD,
+    AbrMand.BankCodeDD as BankCodeDD,
+    AbrMand.AccountNoIBANDD as AccountNoIBANDD,
+    AbrMand.AccountNoDD as AccountNoDD,
+    AbrMand.BankDD as BankDD,
+    -- Bankdaten des IKU-Kontakts
+    BankAccountCC.BankCode1 AS DCABankCodeBIC,
+    BankAccountCC.BankCode2 AS DCABankCode,
+    BankAccountCC.AccountNo1 AS DCAAccountNoIBAN,
+    BankAccountCC.AccountNo2 AS DCAAccountNo,
+    BankAccountCC.Bank AS DCABank,
+    BankAccountCCCT.BankCode1 as DCABankCodeBICCT,
+    BankAccountCCCT.BankCode2 as DCABankCodeCT,
+    BankAccountCCCT.AccountNo1 as DCAAccountNoIBANCT,
+    BankAccountCCCT.AccountNo2 as DCAAccountNoCT,
+    BankAccountCCCT.Bank as DCABankCT,
+    BankAccountCCDD.BankCode1 as DCABankCodeBICDD,
+    BankAccountCCDD.BankCode2 as DCABankCodeDD,
+    BankAccountCCDD.AccountNo1 as DCAAccountNoIBANDD,
+    BankAccountCCDD.AccountNo2 as DCAAccountNoDD,
+    BankAccountCCDD.Bank as DCABankDD,
+    -- Abrechnungsergebnisse incl. OP-Verrechnung
+    MainClearing.InvoiceNo AS InvoiceNo,
+    MainClearing.ClearingNo AS ClearingNo,
+    'OP' AS Sorting,
+    '0' AS StageCategory,
+    '0' AS VATRate,
+    0.0 AS TPMPayout,
+    0.0 AS TPMInvoice,
+    0.0 AS CostBurden,
+    -MainClearing.OIAllocation AS Payout,
+    CASE WHEN Client.ClearingDirectDebitEBankingVoucherBaseSubType LIKE 'DD-SEPA%' THEN 1 ELSE 0 END AS SepaDirectDebit,
+    SDDMUV.Reference AS SepaMandateReference,
+    SDDMUV.SepaCreditorId,
+	Setting.value as CurrencyCode,
+	Currency.Designation as CurrencyDesignation,
+	-MainClearing.OIAllocation AS PayoutInBookingCurrency,
+	Setting.value AS BookingCurrency,
+	AbrMand.BlockForClearingDirectDebit,
+	AbrMand.BlockForClearingTransfer,
+	Client.UDF_Interne_Mandantennummer InternalClientNo,
+	Debtor.ContactID DebtorId,
+	Debtor.DebtorFAO,
+	Debtor.DebtorAddressForm,
+	Debtor.DebtorFirstName,
+	Debtor.DebtorName1,
+	Debtor.DebtorName2,
+	Debtor.DebtorName3,
+	Debtor.Street DebtorStreet,
+	Debtor.City DebtorCity,
+	Debtor.CountryCode DebtorCountryCode,
+	Debtor.DebtorCountry,
+	Debtor.PostalCode DebtorPostalCode,
+	Creditor.ContactID CreditorId,
+	Creditor.CreditorFAO,
+	Creditor.CreditorAddressForm,
+	Creditor.CreditorFirstName,
+	Creditor.CreditorName1,
+	Creditor.CreditorName2,
+	Creditor.CreditorName3,
+	Creditor.Street CreditorStreet,
+	Creditor.City CreditorCity,
+	Creditor.CountryCode CreditorCountryCode,
+	Creditor.CreditorCountry,
+	Creditor.PostalCode CreditorPostalCode
+FROM ikaros.Clearing AS SubClearing -- Clearing des Einzel-Gläubigers
+RIGHT OUTER JOIN ikaros.Clearing AS MainClearing -- Clearing des Verbund-Gläubigers 
+ON (MainClearing.ClearingRunID = SubClearing.ClearingRunID AND MainClearing.ClientID = SubClearing.ClearingClientID) 
+CROSS JOIN ikaros.Setting
+JOIN	ikaros.ClearingClientName AS AbrMand ON AbrMand.ID = MainClearing.ID
+JOIN ikaros.Client AS Client ON Client.ContactID = SubClearing.ClientID
+JOIN ikaros.Contact ON Contact.ID = subClearing.ClientID -- Kontakt zum Einzel-Gläubiger
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCC ON (BankAccountCC.ID = ikaros.BankAccountGetStandard(ikaros.SettingGetString('IKUKontakt', DEFAULT, DEFAULT), DEFAULT))
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCCCT ON (BankAccountCCCT.ID = ikaros.BankAccountGetForClearing(AbrMand.ContactID,'I','CT', AbrMand.CreditTransfer, DEFAULT))
+LEFT OUTER JOIN ikaros.BankAccount AS BankAccountCCDD ON (BankAccountCCDD.ID = ikaros.BankAccountGetForClearing(AbrMand.ContactID,'I','DD', AbrMand.DebitEntry, DEFAULT))
+LEFT JOIN ikaros.Country on  AbrMand.BookingCountryCode = Country.PostCode
+JOIN ikaros.Client AS AbrClient on AbrMand.ContactID = AbrClient.ContactID
+LEFT OUTER JOIN ikaros.SepaDirectDebitMandateUpdateableValues SDDMUV on (SDDMUV.SepaDirectDebitMandateId = Client.ClearingSepaDirectDebitMandateID
+	AND SDDMUV.Id = (SELECT TOP 1 ID FROM ikaros.SepaDirectDebitMandateUpdateableValues WHERE SepaDirectDebitMandateId = Client.ClearingSepaDirectDebitMandateID ORDER BY LastUpdate DESC))
+LEFT JOIN ikaros.Currency ON ikaros.Setting.Value = Currency.Code
+LEFT JOIN Debtor ON Debtor.ContactID = Client.ContactID
+LEFT JOIN Creditor ON Creditor.ContactID = Client.ContactID
+WHERE -MainClearing.OIAllocation <> 0 AND Setting.SettingName = 'waehrung'
+GO
